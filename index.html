@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>YES/NO ボタン判定アプリ</title>
+<style>
+  :root{
+    --bg:#0b0c0f; --panel:#12141a; --ink:#e8eaf0; --muted:#a7adbb;
+    --accent:#42d392; --accent-2:#8b5cf6; --danger:#ef4444; --ok:#22c55e;
+    --chip:#1b1f2a; --border:#242938; --btn:#1b2130;
+  }
+  html,body{height:100%}
+  body{
+    margin:0; background:linear-gradient(180deg,#0b0c0f, #0f1220 40%, #0b0c0f);
+    color:var(--ink); font:16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", "Meiryo", sans-serif;
+    letter-spacing:.02em;
+  }
+  .wrap{max-width:960px;margin:auto;padding:24px}
+  .hdr{display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+  h1{font-size:clamp(20px,2.8vw,28px);margin:8px 0 0}
+  .sub{color:var(--muted);font-size:14px}
+  .card{
+    background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01));
+    border:1px solid var(--border); border-radius:16px; padding:16px 18px;
+    box-shadow:0 6px 20px rgba(0,0,0,.25)
+  }
+  .q-grid{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center}
+  .q-title{font-weight:700}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .chip{background:var(--chip);border:1px solid var(--border);padding:4px 8px;border-radius:999px;color:var(--muted);font-size:12px}
+  .btn{
+    -webkit-tap-highlight-color:transparent;
+    cursor:pointer;border:1px solid var(--border);background:var(--btn);
+    color:var(--ink);padding:10px 14px;border-radius:12px;font-weight:700;
+    transition:transform .06s ease, box-shadow .15s ease, border-color .2s ease;
+    box-shadow:0 4px 10px rgba(0,0,0,.25)
+  }
+  .btn:active{transform:translateY(1px)}
+  .btn.yes[data-active="true"]{border-color:#2dd4bf; box-shadow:0 0 0 3px rgba(45,212,191,.18) inset}
+  .btn.no[data-active="true"]{border-color:#f97316; box-shadow:0 0 0 3px rgba(249,115,22,.18) inset}
+  .btn.ghost{background:transparent}
+  .stack{display:grid;gap:14px}
+  .row{display:grid;grid-template-columns:1fr auto auto; gap:12px;align-items:center}
+  .result{margin-top:18px; display:grid; gap:12px}
+  .badge{display:inline-flex;gap:8px;align-items:center;padding:6px 10px;border-radius:999px;font-weight:800}
+  .ok{background:rgba(34,197,94,.12); color:#A7F3D0; border:1px solid rgba(34,197,94,.35)}
+  .ng{background:rgba(239,68,68,.12); color:#fecaca; border:1px solid rgba(239,68,68,.35)}
+  .muted{color:var(--muted)}
+  .grid-2{display:grid; gap:12px}
+  @media(min-width:800px){ .grid-2{grid-template-columns:1fr 1fr} }
+  .list{margin:0;padding-left:18px}
+  .footer{display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end}
+  .small{font-size:12px}
+  .sr-only{position:absolute !important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hdr">
+      <div>
+        <h1>YES/NO 判定（ボタン式）</h1>
+        <div class="sub">添付表の5条件に基づき、YESの数で総合判定します（初期しきい値=3）。</div>
+      </div>
+      <div>
+        <button class="btn ghost" id="resetBtn" aria-label="リセット">リセット</button>
+      </div>
+    </div>
+
+    <div class="stack" id="app" role="group" aria-labelledby="qgroup">
+      <span id="qgroup" class="sr-only">質問リスト</span>
+      <!-- 質問がJSで差し込まれます -->
+    </div>
+
+    <div class="card result" id="result" aria-live="polite">
+      <div class="row">
+        <div>
+          <span id="verdictBadge" class="badge ng">未判定</span>
+          <div class="small muted" id="scoreText">YES: 0 / 5</div>
+        </div>
+        <div class="footer">
+          <button class="btn" id="copyBtn">判定をコピー</button>
+          <button class="btn" id="shareBtn">URLに保存</button>
+          <button class="btn ghost" id="printBtn">印刷 / PDF</button>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="q-title">YESを選んだ根拠</div>
+          <ul class="list" id="whyYes"></ul>
+        </div>
+        <div class="card">
+          <div class="q-title">NOを選んだ根拠</div>
+          <ul class="list" id="whyNo"></ul>
+        </div>
+      </div>
+      <div class="muted small">しきい値や文言はコード先頭の定数で調整できます。</div>
+    </div>
+  </div>
+
+<script>
+/** ====== 設定 ====== */
+const THRESHOLD = 3; // YES がこの数以上なら「推奨」
+const QUESTIONS = [
+  {
+    id: "q1",
+    title: "繰り返し蓄積する情報か？",
+    yesHint: "毎回の会議議事録、月次レポート、顧客対応履歴など",
+    noHint:  "1回きりの企画書・単発メモなど",
+  },
+  {
+    id: "q2",
+    title: "共通の項目で整理したいか？",
+    yesHint: "顧客名・日付・担当者・ステータスなど統一項目で管理したい",
+    noHint:  "自由な文章や思考の整理が目的",
+  },
+  {
+    id: "q3",
+    title: "チームで共有・利用するか？",
+    yesHint: "複数人で編集/閲覧/検索する必要がある",
+    noHint:  "個人のみで使用",
+  },
+  {
+    id: "q4",
+    title: "絞り込みや検索が必要か？",
+    yesHint: "特定条件で情報を素早く見つけたい",
+    noHint:  "順番に読むだけで十分",
+  },
+  {
+    id: "q5",
+    title: "定期的に更新するか？",
+    yesHint: "継続的に追加・修正・更新する",
+    noHint:  "作成して終わり",
+  },
+];
+
+/** ====== 状態保持 ====== */
+const state = Object.fromEntries(QUESTIONS.map(q => [q.id, null])); // true/false/null
+
+/** ====== DOM 参照 ====== */
+const app = document.getElementById("app");
+const verdictBadge = document.getElementById("verdictBadge");
+const scoreText = document.getElementById("scoreText");
+const whyYes = document.getElementById("whyYes");
+const whyNo = document.getElementById("whyNo");
+
+function el(tag, attrs={}, ...children){
+  const n = document.createElement(tag);
+  Object.entries(attrs).forEach(([k,v])=>{
+    if(k==="dataset") Object.entries(v).forEach(([dk,dv])=>n.dataset[dk]=dv);
+    else if(k.startsWith("on") && typeof v==="function") n.addEventListener(k.slice(2), v);
+    else if(v!==null && v!==undefined) n.setAttribute(k, v);
+  });
+  children.forEach(c => n.append(c instanceof Node ? c : document.createTextNode(c)));
+  return n;
+}
+
+/** ====== UI 構築 ====== */
+QUESTIONS.forEach(q=>{
+  const yesBtn = el("button", {class:"btn yes", "aria-pressed":"false"}, "YES");
+  const noBtn  = el("button", {class:"btn no",  "aria-pressed":"false"}, "NO");
+
+  yesBtn.addEventListener("click", ()=>{
+    state[q.id] = state[q.id]===true ? null : true;
+    yesBtn.dataset.active = state[q.id]===true ? "true":"false";
+    noBtn.dataset.active  = "false";
+    yesBtn.setAttribute("aria-pressed", state[q.id]===true);
+    noBtn.setAttribute("aria-pressed", false);
+    render();
+  });
+
+  noBtn.addEventListener("click", ()=>{
+    state[q.id] = state[q.id]===false ? null : false;
+    noBtn.dataset.active  = state[q.id]===false ? "true":"false";
+    yesBtn.dataset.active = "false";
+    noBtn.setAttribute("aria-pressed", state[q.id]===false);
+    yesBtn.setAttribute("aria-pressed", false);
+    render();
+  });
+
+  const row = el("div",{class:"card"},
+    el("div",{class:"row"},
+      el("div",{},
+        el("div",{class:"q-title"}, q.title),
+        el("div",{class:"chips"},
+          el("span",{class:"chip"},"YES例：", q.yesHint),
+          el("span",{class:"chip"},"NO例：",  q.noHint),
+        )
+      ),
+      yesBtn,
+      noBtn
+    )
+  );
+  app.append(row);
+});
+
+/** ====== 判定ロジック ====== */
+function calcScore(){
+  const values = Object.values(state);
+  const yes = values.filter(v=>v===true).length;
+  const no  = values.filter(v=>v===false).length;
+  const unanswered = values.filter(v=>v===null).length;
+  return {yes,no,unanswered};
+}
+
+function verdictText(score){
+  if(score.unanswered===QUESTIONS.length) return {text:"未判定", cls:"ng"};
+  if(score.yes >= THRESHOLD) return {text:"推奨（YESが多い）", cls:"ok"};
+  return {text:"非推奨（NOが多い）", cls:"ng"};
+}
+
+function render(){
+  const s = calcScore();
+  const v = verdictText(s);
+  verdictBadge.textContent = v.text;
+  verdictBadge.className = "badge " + v.cls;
+  scoreText.textContent = `YES: ${s.yes} / ${QUESTIONS.length}（未回答: ${s.unanswered}）`;
+
+  // 根拠リスト
+  whyYes.innerHTML = "";
+  whyNo.innerHTML = "";
+  QUESTIONS.forEach(q=>{
+    if(state[q.id]===true)  whyYes.append(el("li",{}, q.title+" … "+q.yesHint));
+    if(state[q.id]===false) whyNo.append(el("li",{},  q.title+" … "+q.noHint));
+  });
+}
+
+/** ====== 操作ボタン ====== */
+document.getElementById("resetBtn").addEventListener("click", ()=>{
+  Object.keys(state).forEach(k => state[k]=null);
+  document.querySelectorAll(".btn.yes, .btn.no").forEach(b=>{
+    b.dataset.active="false"; b.setAttribute("aria-pressed","false");
+  });
+  render();
+});
+
+document.getElementById("printBtn").addEventListener("click", ()=>window.print());
+
+document.getElementById("copyBtn").addEventListener("click", async ()=>{
+  const s = calcScore();
+  const v = verdictText(s).text;
+  const yesList = [...whyYes.querySelectorAll("li")].map(li=>`- ${li.textContent}`).join("\n");
+  const noList  = [...whyNo.querySelectorAll("li")].map(li=>`- ${li.textContent}`).join("\n");
+  const text = [
+    `判定: ${v}`,
+    `YES: ${s.yes} / ${QUESTIONS.length}（未回答: ${s.unanswered}）`,
+    yesList ? "\n【YES根拠】\n"+yesList : "",
+    noList  ? "\n【NO根拠】\n"+noList  : "",
+  ].join("\n");
+  try{
+    await navigator.clipboard.writeText(text);
+    alert("判定をクリップボードにコピーしました。");
+  }catch{
+    alert("コピーに失敗しました。手動で選択してください。");
+  }
+});
+
+// URL パラメータに保存 & 復元（共有用）
+document.getElementById("shareBtn").addEventListener("click", ()=>{
+  // state を「1/0/_」の並びに
+  const bits = QUESTIONS.map(q=>{
+    const v = state[q.id]; return v===true ? "1" : v===false ? "0" : "_";
+  }).join("");
+  const url = new URL(location.href);
+  url.searchParams.set("s", bits);
+  history.replaceState(null,"",url.toString());
+  alert("現在の回答をURLに保存しました。URLを共有すれば同じ状態で開けます。");
+});
+
+(function restoreFromURL(){
+  const bits = new URL(location.href).searchParams.get("s");
+  if(!bits || bits.length !== QUESTIONS.length) return;
+  [...bits].forEach((b, i)=>{
+    const id = QUESTIONS[i].id;
+    if(b==="1") state[id]=true;
+    else if(b==="0") state[id]=false;
+    else state[id]=null;
+  });
+  // ボタンの見た目も同期
+  QUESTIONS.forEach((q, idx)=>{
+    const row = app.children[idx];
+    const yesBtn = row.querySelector(".btn.yes");
+    const noBtn  = row.querySelector(".btn.no");
+    yesBtn.dataset.active = state[q.id]===true ? "true":"false";
+    noBtn.dataset.active  = state[q.id]===false ? "true":"false";
+    yesBtn.setAttribute("aria-pressed", state[q.id]===true);
+    noBtn.setAttribute("aria-pressed", state[q.id]===false);
+  });
+  render();
+})();
+render();
+</script>
+</body>
+</html>
